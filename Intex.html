@@ -1,0 +1,802 @@
+```react
+import React, { useState, useEffect } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, doc, collection, onSnapshot, setDoc, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { 
+  Monitor, Lock, Bell, Clock, MapPin, Phone, 
+  CheckCircle, Clock3, XCircle, CreditCard, Banknote,
+  LayoutDashboard, Settings, List, Plus, Trash2, Edit, ChevronRight, X
+} from 'lucide-react';
+
+// --- Firebase Setup ---
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'shree-shyam-csc';
+
+// Global Constants
+const HELPLINE = "9416478687";
+const ADDRESS = "NEAR DHRAMASALA, NEAR DISPENSARY, NIHALAWAS, MAHENDARGARH, HARYANA, 123028";
+const CSC_NAME = "SHREE SHYAM CSC CENTRE";
+const ADMIN_PIN = "admin123"; // Simple PIN for the demo sandbox
+
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [view, setView] = useState('public'); // 'public', 'login', 'admin'
+  const [adminTab, setAdminTab] = useState('bookings'); // 'bookings', 'services', 'settings'
+
+  // Data States
+  const [settings, setSettings] = useState({
+    notification: 'Welcome to Shree Shyam CSC Centre!',
+    upiId: 'shreeshyam@upi',
+    shopStatus: 'open',
+    openingTimes: 'Mon-Sat: 9:00 AM - 6:00 PM',
+  });
+  const [services, setServices] = useState([]);
+  const [bookings, setBookings] = useState([]);
+
+  // Modals & Forms
+  const [bookingModal, setBookingModal] = useState({ isOpen: false, service: null });
+  const [serviceForm, setServiceForm] = useState({ isOpen: false, data: null });
+  const [toast, setToast] = useState(null);
+
+  // --- Auth & Listeners ---
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (err) {
+        console.error("Auth Error:", err);
+      }
+    };
+    initAuth();
+
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      setAuthLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const settingsRef = doc(db, 'artifacts', appId, 'public', 'data', 'config', 'settings');
+    const servicesRef = collection(db, 'artifacts', appId, 'public', 'data', 'services');
+    const bookingsRef = collection(db, 'artifacts', appId, 'public', 'data', 'bookings');
+
+    const unsubSettings = onSnapshot(settingsRef, (docSnap) => {
+      if (docSnap.exists()) {
+        setSettings(prev => ({ ...prev, ...docSnap.data() }));
+      } else {
+        // Initialize default settings
+        setDoc(settingsRef, settings);
+      }
+    }, (err) => console.error(err));
+
+    const unsubServices = onSnapshot(servicesRef, (snap) => {
+      const srv = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      srv.sort((a, b) => b.timestamp - a.timestamp);
+      setServices(srv);
+    }, (err) => console.error(err));
+
+    const unsubBookings = onSnapshot(bookingsRef, (snap) => {
+      const bks = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      bks.sort((a, b) => b.timestamp - a.timestamp);
+      setBookings(bks);
+    }, (err) => console.error(err));
+
+    return () => {
+      unsubSettings();
+      unsubServices();
+      unsubBookings();
+    };
+  }, [user]);
+
+  const showToast = (msg) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center text-cyan-400">
+        <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-cyan-400 border-solid"></div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-blue-950 to-slate-950 text-slate-100 font-sans selection:bg-cyan-500 selection:text-white">
+      {/* Navbar */}
+      <nav className="bg-slate-900/80 backdrop-blur-md border-b border-slate-700/50 sticky top-0 z-40">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-20">
+            <div className="flex items-center gap-3 cursor-pointer" onClick={() => setView('public')}>
+              <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center shadow-[0_0_15px_rgba(6,182,212,0.5)]">
+                <Monitor className="text-white w-7 h-7" />
+              </div>
+              <div>
+                <h1 className="text-xl sm:text-2xl font-black tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-400">
+                  {CSC_NAME}
+                </h1>
+                <p className="text-xs text-slate-400 tracking-widest font-medium uppercase">Digital Services</p>
+              </div>
+            </div>
+            <div>
+              {view === 'admin' ? (
+                <button 
+                  onClick={() => setView('public')}
+                  className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600 text-sm font-semibold transition-all flex items-center gap-2"
+                >
+                  <Monitor size={16} /> Public View
+                </button>
+              ) : (
+                <button 
+                  onClick={() => setView('login')}
+                  className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600 text-sm font-semibold transition-all flex items-center gap-2"
+                >
+                  <Lock size={16} /> Owner Login
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </nav>
+
+      {/* Main Content Area */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 min-h-[calc(100vh-160px)]">
+        {view === 'public' && (
+          <PublicView 
+            settings={settings} 
+            services={services} 
+            onBook={(service) => setBookingModal({ isOpen: true, service })} 
+          />
+        )}
+        {view === 'login' && <OwnerLogin onLogin={() => setView('admin')} onCancel={() => setView('public')} />}
+        {view === 'admin' && (
+          <AdminDashboard 
+            activeTab={adminTab}
+            setTab={setAdminTab}
+            settings={settings}
+            services={services}
+            bookings={bookings}
+            showToast={showToast}
+          />
+        )}
+      </main>
+
+      {/* Footer */}
+      <footer className="bg-slate-950 border-t border-slate-800 py-8 text-center text-slate-400 text-sm">
+        <div className="max-w-4xl mx-auto flex flex-col gap-2 items-center px-4">
+          <p className="flex items-center gap-2 text-cyan-400 font-semibold text-lg">
+            <Phone size={18} /> Helpline: {HELPLINE}
+          </p>
+          <p className="flex items-center gap-2 max-w-lg text-center justify-center">
+            <MapPin size={16} className="flex-shrink-0" /> {ADDRESS}
+          </p>
+          <p className="mt-4 text-xs opacity-50">&copy; {new Date().getFullYear()} {CSC_NAME}. All rights reserved.</p>
+        </div>
+      </footer>
+
+      {/* Booking Modal */}
+      {bookingModal.isOpen && (
+        <BookingModal 
+          service={bookingModal.service} 
+          settings={settings}
+          onClose={() => setBookingModal({ isOpen: false, service: null })}
+          showToast={showToast}
+        />
+      )}
+
+      {/* Global Toast */}
+      {toast && (
+        <div className="fixed bottom-6 right-6 bg-cyan-600 text-white px-6 py-3 rounded-lg shadow-[0_0_20px_rgba(6,182,212,0.4)] font-medium z-50 animate-bounce">
+          {toast}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ==========================================
+// PUBLIC VIEW COMPONENT
+// ==========================================
+function PublicView({ settings, services, onBook }) {
+  return (
+    <div className="space-y-8 animate-in fade-in duration-500">
+      
+      {/* Notification Corner */}
+      <div className="bg-gradient-to-r from-blue-900/50 to-slate-900/50 border border-blue-500/30 rounded-2xl p-4 flex items-start sm:items-center gap-4 shadow-lg">
+        <div className="p-3 bg-blue-500/20 rounded-full text-cyan-400">
+          <Bell className="animate-pulse" />
+        </div>
+        <div>
+          <h3 className="text-cyan-400 font-bold uppercase text-xs tracking-wider mb-1">Notification Corner</h3>
+          <p className="text-slate-200 text-sm sm:text-base leading-relaxed">{settings.notification}</p>
+        </div>
+      </div>
+
+      {/* Status & Timing */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="bg-slate-800/40 border border-slate-700 rounded-2xl p-6 flex items-center gap-4 backdrop-blur-sm">
+          <Clock className="text-slate-400 w-8 h-8" />
+          <div>
+            <p className="text-slate-400 text-sm font-medium">Operating Hours</p>
+            <p className="text-lg font-semibold text-slate-100">{settings.openingTimes}</p>
+          </div>
+        </div>
+        <div className={`border rounded-2xl p-6 flex items-center gap-4 backdrop-blur-sm ${settings.shopStatus === 'open' ? 'bg-green-900/20 border-green-500/30' : 'bg-red-900/20 border-red-500/30'}`}>
+          <div className={`w-4 h-4 rounded-full ${settings.shopStatus === 'open' ? 'bg-green-500 shadow-[0_0_10px_#22c55e]' : 'bg-red-500 shadow-[0_0_10px_#ef4444]'} animate-pulse`}></div>
+          <div>
+            <p className="text-slate-400 text-sm font-medium">Current Status</p>
+            <p className={`text-xl font-bold uppercase ${settings.shopStatus === 'open' ? 'text-green-400' : 'text-red-400'}`}>
+              Shop is {settings.shopStatus}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Services Grid */}
+      <div>
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+            <LayoutDashboard className="text-cyan-400" /> Available Services
+          </h2>
+        </div>
+        
+        {services.length === 0 ? (
+          <div className="text-center py-12 bg-slate-800/20 border border-slate-700/50 rounded-2xl">
+            <p className="text-slate-400">No services available at the moment. Please check back later.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {services.map(service => (
+              <div key={service.id} className="bg-slate-800/50 border border-slate-700 rounded-2xl p-6 hover:bg-slate-800 hover:border-cyan-500/50 transition-all group flex flex-col justify-between h-full backdrop-blur-sm">
+                <div>
+                  <h3 className="text-xl font-bold text-slate-100 group-hover:text-cyan-400 transition-colors mb-3">
+                    {service.name}
+                  </h3>
+                  <div className="space-y-2 mb-6">
+                    <p className="text-sm flex justify-between border-b border-slate-700 pb-1">
+                      <span className="text-slate-400">Charges:</span>
+                      <span className="font-semibold text-green-400">₹{service.charge}</span>
+                    </p>
+                    <p className="text-sm flex justify-between border-b border-slate-700 pb-1">
+                      <span className="text-slate-400">Timeline:</span>
+                      <span className="font-medium text-slate-200">{service.timeline}</span>
+                    </p>
+                    <div className="text-sm pt-2">
+                      <span className="text-slate-400 block mb-1">Required Documents:</span>
+                      <p className="text-slate-300 bg-slate-900/50 p-2 rounded text-xs leading-relaxed">
+                        {service.docsRequired || 'None'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => onBook(service)}
+                  disabled={settings.shopStatus !== 'open'}
+                  className={`w-full py-3 rounded-lg font-bold transition-all flex items-center justify-center gap-2 ${
+                    settings.shopStatus === 'open' 
+                      ? 'bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 shadow-[0_0_15px_rgba(6,182,212,0.3)] hover:shadow-[0_0_20px_rgba(6,182,212,0.5)] text-white' 
+                      : 'bg-slate-700 text-slate-500 cursor-not-allowed'
+                  }`}
+                >
+                  {settings.shopStatus === 'open' ? 'Book / Apply Now' : 'Closed Currently'}
+                  <ChevronRight size={18} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ==========================================
+// BOOKING MODAL
+// ==========================================
+function BookingModal({ service, settings, onClose, showToast }) {
+  const [loading, setLoading] = useState(false);
+  const [formData, setFormData] = useState({
+    customerName: '',
+    phone: '',
+    paymentMethod: 'cash'
+  });
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const bRef = collection(db, 'artifacts', appId, 'public', 'data', 'bookings');
+      await addDoc(bRef, {
+        ...formData,
+        serviceId: service.id,
+        serviceName: service.name,
+        paymentStatus: 'pending',
+        bookingStatus: 'pending',
+        timestamp: Date.now()
+      });
+      showToast('Booking submitted successfully!');
+      onClose();
+    } catch (err) {
+      console.error(err);
+      alert("Failed to submit booking.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in">
+      <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
+        <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-800/50">
+          <h3 className="font-bold text-lg text-cyan-400">Apply for Service</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-white"><X size={20}/></button>
+        </div>
+        <div className="p-6">
+          <div className="mb-6 bg-slate-800 p-4 rounded-xl border border-slate-700">
+            <h4 className="font-semibold text-slate-200">{service.name}</h4>
+            <p className="text-sm text-slate-400 mt-1">Total Charges: <span className="text-green-400 font-bold">₹{service.charge}</span></p>
+          </div>
+          
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-400 mb-1">Your Name</label>
+              <input 
+                required
+                type="text" 
+                value={formData.customerName}
+                onChange={e => setFormData({...formData, customerName: e.target.value})}
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-colors"
+                placeholder="Enter full name"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-400 mb-1">Phone Number</label>
+              <input 
+                required
+                type="tel" 
+                pattern="[0-9]{10}"
+                title="10 digit phone number"
+                value={formData.phone}
+                onChange={e => setFormData({...formData, phone: e.target.value})}
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-colors"
+                placeholder="10-digit mobile number"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-400 mb-1">Payment Method</label>
+              <div className="grid grid-cols-2 gap-3">
+                <button 
+                  type="button"
+                  onClick={() => setFormData({...formData, paymentMethod: 'cash'})}
+                  className={`py-3 rounded-lg border flex items-center justify-center gap-2 font-medium transition-colors ${formData.paymentMethod === 'cash' ? 'bg-cyan-900/40 border-cyan-500 text-cyan-400' : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'}`}
+                >
+                  <Banknote size={18} /> Cash
+                </button>
+                <button 
+                  type="button"
+                  onClick={() => setFormData({...formData, paymentMethod: 'online'})}
+                  className={`py-3 rounded-lg border flex items-center justify-center gap-2 font-medium transition-colors ${formData.paymentMethod === 'online' ? 'bg-cyan-900/40 border-cyan-500 text-cyan-400' : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'}`}
+                >
+                  <CreditCard size={18} /> Online
+                </button>
+              </div>
+            </div>
+
+            {formData.paymentMethod === 'online' && (
+              <div className="bg-blue-900/30 border border-blue-500/50 p-4 rounded-xl text-center animate-in slide-in-from-top-2">
+                <p className="text-sm text-blue-200 mb-2">Please pay ₹{service.charge} to this UPI ID:</p>
+                <p className="font-mono text-xl font-bold text-white bg-slate-900 py-2 rounded-lg border border-slate-700 select-all">
+                  {settings.upiId}
+                </p>
+                <p className="text-xs text-blue-300 mt-2">Enter details above after payment.</p>
+              </div>
+            )}
+
+            <button 
+              type="submit" 
+              disabled={loading}
+              className="w-full mt-6 bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-3 rounded-lg shadow-lg transition-all disabled:opacity-50"
+            >
+              {loading ? 'Submitting...' : 'Confirm Booking'}
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ==========================================
+// OWNER LOGIN
+// ==========================================
+function OwnerLogin({ onLogin, onCancel }) {
+  const [pin, setPin] = useState('');
+  const [error, setError] = useState('');
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (pin === ADMIN_PIN) {
+      onLogin();
+    } else {
+      setError('Invalid PIN. Try "admin123"');
+    }
+  };
+
+  return (
+    <div className="max-w-md mx-auto mt-20 p-8 bg-slate-800/80 backdrop-blur-md border border-slate-700 rounded-2xl shadow-2xl">
+      <div className="text-center mb-8">
+        <div className="w-16 h-16 bg-slate-700 rounded-full flex items-center justify-center mx-auto mb-4 border border-slate-600">
+          <Lock className="text-cyan-400 w-8 h-8" />
+        </div>
+        <h2 className="text-2xl font-bold text-white">Owner Portal</h2>
+        <p className="text-slate-400 text-sm mt-1">Enter PIN to access dashboard</p>
+      </div>
+
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <input 
+            type="password"
+            value={pin}
+            onChange={e => {setPin(e.target.value); setError('');}}
+            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-center text-2xl text-white focus:outline-none focus:border-cyan-500 tracking-widest"
+            placeholder="••••••••"
+            autoFocus
+          />
+          {error && <p className="text-red-400 text-sm text-center mt-2">{error}</p>}
+        </div>
+        <button 
+          type="submit"
+          className="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-3 rounded-xl shadow-lg transition-all"
+        >
+          Login
+        </button>
+        <button 
+          type="button"
+          onClick={onCancel}
+          className="w-full bg-transparent hover:bg-slate-700 text-slate-300 font-medium py-3 rounded-xl transition-all"
+        >
+          Cancel
+        </button>
+      </form>
+    </div>
+  );
+}
+
+// ==========================================
+// ADMIN DASHBOARD
+// ==========================================
+function AdminDashboard({ activeTab, setTab, settings, services, bookings, showToast }) {
+  const tabs = [
+    { id: 'bookings', label: 'Bookings', icon: <List size={18} /> },
+    { id: 'services', label: 'Services', icon: <LayoutDashboard size={18} /> },
+    { id: 'settings', label: 'Settings', icon: <Settings size={18} /> },
+  ];
+
+  return (
+    <div className="flex flex-col md:flex-row gap-6 animate-in fade-in duration-300">
+      {/* Sidebar */}
+      <div className="w-full md:w-64 flex-shrink-0 space-y-2">
+        {tabs.map(t => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-all ${
+              activeTab === t.id 
+                ? 'bg-cyan-600/20 border border-cyan-500/50 text-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.1)]' 
+                : 'bg-slate-800/50 border border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+            }`}
+          >
+            {t.icon} {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Content Area */}
+      <div className="flex-1 bg-slate-900/50 border border-slate-700/50 rounded-2xl backdrop-blur-sm p-4 sm:p-6 min-h-[500px]">
+        {activeTab === 'bookings' && <ManageBookings bookings={bookings} showToast={showToast} />}
+        {activeTab === 'services' && <ManageServices services={services} showToast={showToast} />}
+        {activeTab === 'settings' && <ManageSettings settings={settings} showToast={showToast} />}
+      </div>
+    </div>
+  );
+}
+
+// --- Admin: Manage Bookings ---
+function ManageBookings({ bookings, showToast }) {
+  
+  const updateStatus = async (id, field, value) => {
+    try {
+      const ref = doc(db, 'artifacts', appId, 'public', 'data', 'bookings', id);
+      await updateDoc(ref, { [field]: value });
+      showToast('Booking updated.');
+    } catch (err) {
+      console.error(err);
+      alert("Failed to update.");
+    }
+  };
+
+  const getStatusColor = (status) => {
+    if(status === 'done' || status === 'approved') return 'text-green-400 bg-green-400/10 border-green-400/20';
+    if(status === 'pending') return 'text-amber-400 bg-amber-400/10 border-amber-400/20';
+    return 'text-slate-400 bg-slate-800 border-slate-700';
+  };
+
+  return (
+    <div>
+      <h2 className="text-xl font-bold text-white mb-6 border-b border-slate-700 pb-4">Recent Bookings</h2>
+      
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-sm text-slate-300">
+          <thead className="bg-slate-800/80 text-slate-400 uppercase text-xs">
+            <tr>
+              <th className="px-4 py-3 rounded-tl-lg">Date</th>
+              <th className="px-4 py-3">Customer</th>
+              <th className="px-4 py-3">Service</th>
+              <th className="px-4 py-3">Payment</th>
+              <th className="px-4 py-3">Status</th>
+              <th className="px-4 py-3 rounded-tr-lg">Action</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-800">
+            {bookings.length === 0 && (
+              <tr><td colSpan="6" className="px-4 py-8 text-center text-slate-500">No bookings found.</td></tr>
+            )}
+            {bookings.map(b => (
+              <tr key={b.id} className="hover:bg-slate-800/30 transition-colors">
+                <td className="px-4 py-4 whitespace-nowrap">
+                  {new Date(b.timestamp).toLocaleDateString()}<br/>
+                  <span className="text-xs text-slate-500">{new Date(b.timestamp).toLocaleTimeString()}</span>
+                </td>
+                <td className="px-4 py-4">
+                  <div className="font-medium text-slate-200">{b.customerName}</div>
+                  <div className="text-xs text-slate-400">{b.phone}</div>
+                </td>
+                <td className="px-4 py-4 font-medium text-cyan-400">{b.serviceName}</td>
+                <td className="px-4 py-4">
+                  <div className="flex flex-col gap-1 items-start">
+                    <span className="text-xs uppercase bg-slate-800 px-2 py-0.5 rounded text-slate-300">
+                      {b.paymentMethod}
+                    </span>
+                    <select 
+                      value={b.paymentStatus}
+                      onChange={(e) => updateStatus(b.id, 'paymentStatus', e.target.value)}
+                      className={`text-xs border rounded px-2 py-1 outline-none ${b.paymentStatus === 'done' ? 'bg-green-900/30 border-green-500 text-green-400' : 'bg-slate-800 border-slate-600 text-slate-300'}`}
+                    >
+                      <option value="pending">Pending</option>
+                      <option value="done">Done</option>
+                    </select>
+                  </div>
+                </td>
+                <td className="px-4 py-4">
+                  <select 
+                    value={b.bookingStatus}
+                    onChange={(e) => updateStatus(b.id, 'bookingStatus', e.target.value)}
+                    className={`text-xs border rounded px-2 py-1 outline-none capitalize ${getStatusColor(b.bookingStatus)}`}
+                  >
+                    <option value="pending">Pending</option>
+                    <option value="approved">Approved</option>
+                    <option value="done">Done</option>
+                  </select>
+                </td>
+                <td className="px-4 py-4">
+                   <button 
+                     onClick={async () => {
+                       if(confirm('Delete this booking?')) {
+                         await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'bookings', b.id));
+                         showToast('Booking deleted');
+                       }
+                     }}
+                     className="text-red-400 hover:text-red-300 p-1 bg-red-400/10 rounded"
+                   >
+                     <Trash2 size={16}/>
+                   </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// --- Admin: Manage Services ---
+function ManageServices({ services, showToast }) {
+  const [formOpen, setFormOpen] = useState(false);
+  const [editId, setEditId] = useState(null);
+  const [formData, setFormData] = useState({ name: '', charge: '', timeline: '', docsRequired: '' });
+  const [loading, setLoading] = useState(false);
+
+  const openForm = (srv = null) => {
+    if (srv) {
+      setEditId(srv.id);
+      setFormData({ name: srv.name, charge: srv.charge, timeline: srv.timeline, docsRequired: srv.docsRequired || '' });
+    } else {
+      setEditId(null);
+      setFormData({ name: '', charge: '', timeline: '', docsRequired: '' });
+    }
+    setFormOpen(true);
+  };
+
+  const saveService = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      if (editId) {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'services', editId), formData);
+        showToast('Service updated');
+      } else {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'services'), { ...formData, timestamp: Date.now() });
+        showToast('Service added');
+      }
+      setFormOpen(false);
+    } catch (err) {
+      console.error(err);
+      alert('Error saving service');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const deleteService = async (id) => {
+    if (confirm("Delete this service?")) {
+      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'services', id));
+      showToast('Service deleted');
+    }
+  };
+
+  return (
+    <div>
+      <div className="flex justify-between items-center mb-6 border-b border-slate-700 pb-4">
+        <h2 className="text-xl font-bold text-white">Manage Services</h2>
+        <button 
+          onClick={() => openForm()}
+          className="bg-cyan-600 hover:bg-cyan-500 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2"
+        >
+          <Plus size={16} /> Add Service
+        </button>
+      </div>
+
+      {formOpen ? (
+        <form onSubmit={saveService} className="bg-slate-800 p-6 rounded-xl border border-slate-700 mb-6 animate-in slide-in-from-top-2">
+          <h3 className="text-lg font-bold text-cyan-400 mb-4">{editId ? 'Edit Service' : 'Add New Service'}</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">Service Name</label>
+              <input required type="text" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white" />
+            </div>
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">Charges (₹)</label>
+              <input required type="text" value={formData.charge} onChange={e => setFormData({...formData, charge: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white" />
+            </div>
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">Timeline (e.g., 2-3 Days)</label>
+              <input required type="text" value={formData.timeline} onChange={e => setFormData({...formData, timeline: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white" />
+            </div>
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">Documents Required</label>
+              <input type="text" value={formData.docsRequired} onChange={e => setFormData({...formData, docsRequired: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white" placeholder="Aadhar, PAN, etc." />
+            </div>
+          </div>
+          <div className="flex gap-3 justify-end">
+            <button type="button" onClick={() => setFormOpen(false)} className="px-4 py-2 text-slate-400 hover:text-white">Cancel</button>
+            <button type="submit" disabled={loading} className="bg-cyan-600 hover:bg-cyan-500 text-white px-6 py-2 rounded-lg font-bold disabled:opacity-50">
+              Save
+            </button>
+          </div>
+        </form>
+      ) : null}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {services.map(s => (
+          <div key={s.id} className="bg-slate-800/50 p-4 rounded-xl border border-slate-700 flex justify-between items-start">
+            <div>
+              <h4 className="font-bold text-slate-200">{s.name}</h4>
+              <p className="text-sm text-slate-400 mt-1">₹{s.charge} • {s.timeline}</p>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => openForm(s)} className="p-2 text-slate-400 hover:text-cyan-400 bg-slate-700/50 rounded-lg"><Edit size={16}/></button>
+              <button onClick={() => deleteService(s.id)} className="p-2 text-slate-400 hover:text-red-400 bg-slate-700/50 rounded-lg"><Trash2 size={16}/></button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// --- Admin: Settings ---
+function ManageSettings({ settings, showToast }) {
+  const [formData, setFormData] = useState(settings);
+  const [loading, setLoading] = useState(false);
+
+  const saveSettings = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'settings'), formData);
+      showToast('Settings successfully updated');
+    } catch(err) {
+      console.error(err);
+      alert('Error updating settings');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="max-w-2xl">
+      <h2 className="text-xl font-bold text-white mb-6 border-b border-slate-700 pb-4">Global Settings</h2>
+      <form onSubmit={saveSettings} className="space-y-6">
+        
+        <div className="bg-slate-800/50 p-5 rounded-xl border border-slate-700">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="font-bold text-slate-200">Shop Status</h3>
+              <p className="text-sm text-slate-400">Toggle whether the shop is open or closed for bookings.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setFormData({...formData, shopStatus: formData.shopStatus === 'open' ? 'closed' : 'open'})}
+              className={`relative inline-flex h-8 w-16 items-center rounded-full transition-colors ${formData.shopStatus === 'open' ? 'bg-green-500' : 'bg-red-500'}`}
+            >
+              <span className={`inline-block h-6 w-6 transform rounded-full bg-white transition-transform ${formData.shopStatus === 'open' ? 'translate-x-9' : 'translate-x-1'}`}/>
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-slate-400 mb-2">Public Notification Banner (Real-time)</label>
+          <textarea 
+            rows="3"
+            value={formData.notification}
+            onChange={e => setFormData({...formData, notification: e.target.value})}
+            className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500"
+          ></textarea>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
+            <label className="block text-sm font-medium text-slate-400 mb-2">Opening Times Text</label>
+            <input 
+              type="text" 
+              value={formData.openingTimes}
+              onChange={e => setFormData({...formData, openingTimes: e.target.value})}
+              className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white focus:outline-none focus:border-cyan-500"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-400 mb-2">Online Payment UPI ID</label>
+            <input 
+              type="text" 
+              value={formData.upiId}
+              onChange={e => setFormData({...formData, upiId: e.target.value})}
+              className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white focus:outline-none focus:border-cyan-500"
+            />
+          </div>
+        </div>
+
+        <button 
+          type="submit" 
+          disabled={loading}
+          className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-3 px-8 rounded-lg shadow-lg transition-all disabled:opacity-50 mt-4"
+        >
+          {loading ? 'Saving...' : 'Save Settings'}
+        </button>
+      </form>
+    </div>
+  );
+}
+```
